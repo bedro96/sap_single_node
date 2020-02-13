@@ -2,9 +2,9 @@
 
 cp terraform.tfvars.template terraform.tfvars
 LOCATION='koreacentral'
-HANA_V1_SN_RESOURCE_GROUP_NAME='rsg-hanaholv1'
+HANA_V1_SN_RESOURCE_GROUP_NAME='hanahol-rg'
 
-az group create --location $LOCATION --name $HANA_V1_SN_RESOURCE_GROUP_NAME  
+#az group create --location $LOCATION --name $HANA_V1_SN_RESOURCE_GROUP_NAME  
 DOMAIN_NAME=domhanaholv1$RANDOM
 VM_SIZE='Standard_E8s_v3'
 VM_USERNAME='labuser'

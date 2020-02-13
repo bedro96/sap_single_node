@@ -59,6 +59,11 @@ variable "install_webide" {
   default     = false
 }
 
+variable "hdb_mdc" {
+  description = " Set this flag to false to install HDB with single containers (tenants)"
+  default     = false
+}
+
 variable "private_ip_address_hdb" {
   description = "The desired private IP address of this HANA database.  If it isn't specified, a dynamic IP will be allocated."
   default     = "10.0.0.6"
@@ -143,6 +148,11 @@ variable "url_di_core" {
 
 variable "url_hana_studio_windows" {
   description = "URL for the Windows version of HANA Studio to install on the bastion host"
+  default     = ""
+}
+
+variable "url_sap_hostagent" {
+  description = "URL to download SAP HOST AGENT package from"
   default     = ""
 }
 
