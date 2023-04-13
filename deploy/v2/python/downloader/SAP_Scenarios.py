@@ -17,20 +17,20 @@ class Package(object):
     os_indep        = "OSINDEP"
     
     def __init__(self, name=None, target_dir=None, retr_params=None, condition=None, filter=None, os_avail=None, os_var=None, selector=None):
-        self.name        = name if name else ""
-        self.target_dir  = target_dir if target_dir else ""
-        self.retr_params = retr_params if retr_params else ""
-        self.condition   = condition if condition else []
-        self.filter      = filter if filter else []
-        self.os_avail    = os_avail if os_avail else []
-        self.os_var      = os_var if os_var else ""
-        self.selector    = selector if selector else ""
+        self.name = name or ""
+        self.target_dir = target_dir or ""
+        self.retr_params = retr_params or ""
+        self.condition = condition or []
+        self.filter = filter or []
+        self.os_avail = os_avail or []
+        self.os_var = os_var or ""
+        self.selector = selector or ""
 
 class Scenario(object):
     def __init__(self, name=None, required_params=None, packages=None):
         self.name            = name
-        self.required_params = required_params if required_params else []
-        self.packages        = packages if packages else []
+        self.required_params = required_params or []
+        self.packages = packages or []
 
 class DBScenario(Scenario):
     def __init__(self, **kwargs):

@@ -290,20 +290,13 @@ class AzureRM(object):
         self._adfs_authority_url = None
         self._resource = None
 
-        self.debug = False
-        if args.debug:
-            self.debug = True
-
+        self.debug = bool(args.debug)
         self.credentials = self._get_credentials(args)
         if not self.credentials:
             self.fail("Failed to get credentials. Either pass as parameters, set environment variables, "
                       "or define a profile in ~/.azure/credentials.")
 
-        # if cloud_environment specified, look up/build Cloud object
-        raw_cloud_env = self.credentials.get('cloud_environment')
-        if not raw_cloud_env:
-            self._cloud_environment = azure_cloud.AZURE_PUBLIC_CLOUD  # SDK default
-        else:
+        if raw_cloud_env := self.credentials.get('cloud_environment'):
             # try to look up "well-known" values via the name attribute on azure_cloud members
             all_clouds = [x[1] for x in inspect.getmembers(azure_cloud) if isinstance(x[1], azure_cloud.Cloud)]
             matched_clouds = [x for x in all_clouds if x.name == raw_cloud_env]
@@ -319,6 +312,8 @@ class AzureRM(object):
                 except Exception as e:
                     self.fail("cloud_environment {0} could not be resolved: {1}".format(raw_cloud_env, e.message))
 
+        else:
+            self._cloud_environment = azure_cloud.AZURE_PUBLIC_CLOUD  # SDK default
         if self.credentials.get('subscription_id', None) is None:
             self.fail("Credentials did not include a subscription_id value.")
         self.log("setting subscription_id")
@@ -327,11 +322,10 @@ class AzureRM(object):
         # get authentication authority
         # for adfs, user could pass in authority or not.
         # for others, use default authority from cloud environment
-        if self.credentials.get('adfs_authority_url'):
-            self._adfs_authority_url = self.credentials.get('adfs_authority_url')
-        else:
-            self._adfs_authority_url = self._cloud_environment.endpoints.active_directory
-
+        self._adfs_authority_url = (
+            self.credentials.get('adfs_authority_url')
+            or self._cloud_environment.endpoints.active_directory
+        )
         # get resource from cloud environment
         self._resource = self._cloud_environment.endpoints.active_directory_resource_id
 
@@ -344,9 +338,9 @@ class AzureRM(object):
                                                                  cloud_environment=self._cloud_environment)
 
         elif self.credentials.get('ad_user') is not None and \
-                self.credentials.get('password') is not None and \
-                self.credentials.get('client_id') is not None and \
-                self.credentials.get('tenant') is not None:
+                    self.credentials.get('password') is not None and \
+                    self.credentials.get('client_id') is not None and \
+                    self.credentials.get('tenant') is not None:
 
                 self.azure_credentials = self.acquire_token_with_username_password(
                     self._adfs_authority_url,
@@ -387,7 +381,7 @@ class AzureRM(object):
         except Exception as exc:
             self.fail("Failed to access {0}. Check that the file exists and you have read "
                       "access. {1}".format(path, str(exc)))
-        credentials = dict()
+        credentials = {}
         for key in AZURE_CREDENTIAL_ENV_MAPPING:
             try:
                 credentials[key] = config.get(profile, key, raw=True)
@@ -400,14 +394,12 @@ class AzureRM(object):
         return None
 
     def _get_env_credentials(self):
-        env_credentials = dict()
-        for attribute, env_variable in AZURE_CREDENTIAL_ENV_MAPPING.items():
-            env_credentials[attribute] = os.environ.get(env_variable, None)
-
+        env_credentials = {
+            attribute: os.environ.get(env_variable, None)
+            for attribute, env_variable in AZURE_CREDENTIAL_ENV_MAPPING.items()
+        }
         if env_credentials['profile'] is not None:
-            credentials = self._get_profile(env_credentials['profile'])
-            return credentials
-
+            return self._get_profile(env_credentials['profile'])
         if env_credentials['client_id'] is not None or env_credentials['ad_user'] is not None:
             return env_credentials
 
@@ -417,12 +409,11 @@ class AzureRM(object):
         credentials, subscription_id = get_azure_cli_credentials()
         cloud_environment = get_cli_active_cloud()
 
-        cli_credentials = {
+        return {
             'credentials': credentials,
             'subscription_id': subscription_id,
-            'cloud_environment': cloud_environment
+            'cloud_environment': cloud_environment,
         }
-        return cli_credentials
 
     def _get_msi_credentials(self, subscription_id_param=None):
         credentials = MSIAuthentication()
@@ -445,16 +436,14 @@ class AzureRM(object):
 
         self.log('Getting credentials')
 
-        arg_credentials = dict()
-        for attribute, env_variable in AZURE_CREDENTIAL_ENV_MAPPING.items():
-            arg_credentials[attribute] = getattr(params, attribute)
-
+        arg_credentials = {
+            attribute: getattr(params, attribute)
+            for attribute, env_variable in AZURE_CREDENTIAL_ENV_MAPPING.items()
+        }
         # try module params
         if arg_credentials['profile'] is not None:
             self.log('Retrieving credentials with profile parameter.')
-            credentials = self._get_profile(arg_credentials['profile'])
-            return credentials
-
+            return self._get_profile(arg_credentials['profile'])
         if arg_credentials['client_id'] is not None:
             self.log('Received credentials from parameters.')
             return arg_credentials
@@ -463,28 +452,24 @@ class AzureRM(object):
             self.log('Received credentials from parameters.')
             return arg_credentials
 
-        # try environment
-        env_credentials = self._get_env_credentials()
-        if env_credentials:
+        if env_credentials := self._get_env_credentials():
             self.log('Received credentials from env.')
             return env_credentials
 
-        # try default profile from ~./azure/credentials
-        default_credentials = self._get_profile()
-        if default_credentials:
+        if default_credentials := self._get_profile():
             self.log('Retrieved default profile credentials from ~/.azure/credentials.')
             return default_credentials
 
-        msi_credentials = self._get_msi_credentials(arg_credentials.get('subscription_id'))
-        if msi_credentials:
+        if msi_credentials := self._get_msi_credentials(
+            arg_credentials.get('subscription_id')
+        ):
             self.log('Retrieved credentials from MSI.')
             return msi_credentials
 
         try:
             if HAS_AZURE_CLI_CORE:
                 self.log('Retrieving credentials from AzureCLI profile')
-            cli_credentials = self._get_azure_cli_credentials()
-            return cli_credentials
+            return self._get_azure_cli_credentials()
         except CLIError as ce:
             self.log('Error getting AzureCLI profile credentials - {0}'.format(ce))
 
@@ -494,7 +479,7 @@ class AzureRM(object):
         authority_uri = authority
 
         if tenant is not None:
-            authority_uri = authority + '/' + tenant
+            authority_uri = f'{authority}/{tenant}'
 
         context = AuthenticationContext(authority_uri)
         token_response = context.acquire_token_with_username_password(resource, username, password, client_id)
@@ -579,12 +564,7 @@ class AzureInventory(object):
         self.include_powerstate = True
         self.use_private_ip = False
 
-        self._inventory = dict(
-            _meta=dict(
-                hostvars=dict()
-            ),
-            azure=[]
-        )
+        self._inventory = dict(_meta=dict(hostvars={}), azure=[])
 
         self._get_settings()
 
@@ -726,17 +706,19 @@ class AzureInventory(object):
             if machine.os_profile is not None and machine.os_profile.windows_configuration is not None:
                 host_vars['ansible_connection'] = 'winrm'
                 host_vars['windows_auto_updates_enabled'] = \
-                    machine.os_profile.windows_configuration.enable_automatic_updates
+                        machine.os_profile.windows_configuration.enable_automatic_updates
                 host_vars['windows_timezone'] = machine.os_profile.windows_configuration.time_zone
                 host_vars['windows_rm'] = None
                 if machine.os_profile.windows_configuration.win_rm is not None:
                     host_vars['windows_rm'] = dict(listeners=None)
                     if machine.os_profile.windows_configuration.win_rm.listeners is not None:
-                        host_vars['windows_rm']['listeners'] = []
-                        for listener in machine.os_profile.windows_configuration.win_rm.listeners:
-                            host_vars['windows_rm']['listeners'].append(dict(protocol=listener.protocol.name,
-                                                                             certificate_url=listener.certificate_url))
-
+                        host_vars['windows_rm']['listeners'] = [
+                            dict(
+                                protocol=listener.protocol.name,
+                                certificate_url=listener.certificate_url,
+                            )
+                            for listener in machine.os_profile.windows_configuration.win_rm.listeners
+                        ]
             for interface in machine.network_profile.network_interfaces:
                 interface_reference = self._parse_ref_id(interface.id)
                 network_interface = self._network_client.network_interfaces.get(
@@ -744,11 +726,11 @@ class AzureInventory(object):
                     interface_reference['networkInterfaces'])
                 if network_interface.primary:
                     if self.group_by_security_group and \
-                       self._security_groups[resource_group].get(network_interface.id, None):
+                           self._security_groups[resource_group].get(network_interface.id, None):
                         host_vars['security_group'] = \
-                            self._security_groups[resource_group][network_interface.id]['name']
+                                self._security_groups[resource_group][network_interface.id]['name']
                         host_vars['security_group_id'] = \
-                            self._security_groups[resource_group][network_interface.id]['id']
+                                self._security_groups[resource_group][network_interface.id]['id']
                     host_vars['network_interface'] = network_interface.name
                     host_vars['network_interface_id'] = network_interface.id
                     host_vars['mac_address'] = network_interface.mac_address
@@ -787,9 +769,9 @@ class AzureInventory(object):
     def _get_security_groups(self, resource_group):
         ''' For a given resource_group build a mapping of network_interface.id to security_group name '''
         if not self._security_groups:
-            self._security_groups = dict()
+            self._security_groups = {}
         if not self._security_groups.get(resource_group):
-            self._security_groups[resource_group] = dict()
+            self._security_groups[resource_group] = {}
             for group in self._network_client.network_security_groups.list(resource_group):
                 if group.network_interfaces:
                     for interface in group.network_interfaces:
@@ -844,7 +826,7 @@ class AzureInventory(object):
         if self.group_by_tag and vars.get('tags'):
             for key, value in vars['tags'].items():
                 safe_key = self._to_safe(key)
-                safe_value = safe_key + '_' + self._to_safe(value)
+                safe_value = f'{safe_key}_{self._to_safe(value)}'
                 if not self._inventory.get(safe_key):
                     self._inventory[safe_key] = []
                 if not self._inventory.get(safe_value):
@@ -860,10 +842,7 @@ class AzureInventory(object):
             return json.dumps(self._inventory)
 
     def _get_settings(self):
-        # Load settings from the .ini, if it exists. Otherwise,
-        # look for environment values.
-        file_settings = self._load_settings()
-        if file_settings:
+        if file_settings := self._load_settings():
             for key in AZURE_CONFIG_SETTINGS:
                 if key in ('resource_groups', 'tags', 'locations') and file_settings.get(key):
                     values = file_settings.get(key).split(',')
@@ -884,31 +863,30 @@ class AzureInventory(object):
                     setattr(self, key, val)
 
     def _parse_ref_id(self, reference):
-        response = {}
         keys = reference.strip('/').split('/')
-        for index in range(len(keys)):
-            if index < len(keys) - 1 and index % 2 == 0:
-                response[keys[index]] = keys[index + 1]
-        return response
+        return {
+            keys[index]: keys[index + 1]
+            for index in range(len(keys))
+            if index < len(keys) - 1 and index % 2 == 0
+        }
 
     def _to_boolean(self, value):
         if value in ['Yes', 'yes', 1, 'True', 'true', True]:
-            result = True
+            return True
         elif value in ['No', 'no', 0, 'False', 'false', False]:
-            result = False
+            return False
         else:
-            result = True
-        return result
+            return True
 
     def _get_env_settings(self):
-        env_settings = dict()
-        for attribute, env_variable in AZURE_CONFIG_SETTINGS.items():
-            env_settings[attribute] = os.environ.get(env_variable, None)
-        return env_settings
+        return {
+            attribute: os.environ.get(env_variable, None)
+            for attribute, env_variable in AZURE_CONFIG_SETTINGS.items()
+        }
 
     def _load_settings(self):
         basename = os.path.splitext(os.path.basename(__file__))[0]
-        default_path = os.path.join(os.path.dirname(__file__), (basename + '.ini'))
+        default_path = os.path.join(os.path.dirname(__file__), f'{basename}.ini')
         path = os.path.expanduser(os.path.expandvars(os.environ.get('AZURE_INI_PATH', default_path)))
         config = None
         settings = None
@@ -919,7 +897,7 @@ class AzureInventory(object):
             pass
 
         if config is not None:
-            settings = dict()
+            settings = {}
             for key in AZURE_CONFIG_SETTINGS:
                 try:
                     settings[key] = config.get('azure', key, raw=True)
@@ -950,16 +928,14 @@ class AzureInventory(object):
                 matches += 1
             elif not arg_value and tag_obj.get(arg_key, None) is not None:
                 matches += 1
-        if matches == len(tag_args):
-            return True
-        return False
+        return matches == len(tag_args)
 
     def _to_safe(self, word):
         ''' Converts 'bad' characters in a string to underscores so they can be used as Ansible groups '''
         regex = r"[^A-Za-z0-9\_"
         if not self.replace_dash_in_groups:
             regex += r"\-"
-        return re.sub(regex + "]", "_", word)
+        return re.sub(f"{regex}]", "_", word)
 
 
 def main():

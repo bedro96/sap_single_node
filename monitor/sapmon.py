@@ -31,13 +31,13 @@ import traceback
 
 PAYLOAD_VERSION                   = "0.6.5"
 PAYLOAD_DIRECTORY                 = os.path.dirname(os.path.realpath(__file__))
-STATE_FILE                        = "%s/sapmon.state" % PAYLOAD_DIRECTORY
+STATE_FILE = f"{PAYLOAD_DIRECTORY}/sapmon.state"
 TIME_FORMAT_LOG_ANALYTICS         = "%a, %d %b %Y %H:%M:%S GMT"
 TIME_FORMAT_JSON                  = "%Y-%m-%dT%H:%M:%S.%fZ"
 DEFAULT_CONSOLE_LOG_LEVEL         = logging.INFO
 DEFAULT_FILE_LOG_LEVEL            = logging.INFO
 DEFAULT_QUEUE_LOG_LEVEL           = logging.DEBUG
-LOG_FILENAME                      = "%s/sapmon.log" % PAYLOAD_DIRECTORY
+LOG_FILENAME = f"{PAYLOAD_DIRECTORY}/sapmon.log"
 KEYVAULT_NAMING_CONVENTION        = "sapmon-kv-%s"
 STORAGE_ACCOUNT_NAMING_CONVENTION = "sapmonsto%s"
 STORAGE_QUEUE_NAMING_CONVENTION   = "sapmon-que-%s"
@@ -148,33 +148,35 @@ class SapHanaCheck(SapmonCheck):
       """
       logger.info("preparing SQL statement")
       # insert logic to get server UTC time (_SERVER_UTC)
-      sqlTimestamp = ", '%s' AS %s, '%s' AS %s, CURRENT_UTCTIMESTAMP AS %s FROM DUMMY," % \
-         (self.version, self.COL_CONTENT_VERSION, PAYLOAD_VERSION, self.COL_SAPMON_VERSION, self.COL_SERVER_UTC)
-      logger.debug("sqlTimestamp=%s" % sqlTimestamp)
+      sqlTimestamp = f", '{self.version}' AS {self.COL_CONTENT_VERSION}, '{PAYLOAD_VERSION}' AS {self.COL_SAPMON_VERSION}, CURRENT_UTCTIMESTAMP AS {self.COL_SERVER_UTC} FROM DUMMY,"
+      logger.debug(f"sqlTimestamp={sqlTimestamp}")
       sql = self.query.replace(" FROM", sqlTimestamp, 1)
       # if time series, insert time condition
       if self.isTimeSeries:
-         lastRunServer = self.state.get("lastRunServer", None)
-         # TODO(tniek) - make WHERE conditions for time series queries more flexible
-         if not lastRunServer:
-            logger.info("time series query for check %s_%s has never been run, applying initalTimespanSecs=%d" % \
-               (self.prefix, self.name, self.initialTimespanSecs))
-            lastRunServerUtc = "ADD_SECONDS(NOW(), i.VALUE*(-1) - %d)" % self.initialTimespanSecs
-         else:
+         if lastRunServer := self.state.get("lastRunServer", None):
             if not isinstance(lastRunServer, datetime):
-               logger.error("lastRunServer=%s has not been de-serialized into a valid datetime object" % str(lastRunServer))
+               logger.error(
+                   f"lastRunServer={str(lastRunServer)} has not been de-serialized into a valid datetime object"
+               )
                return None
             try:
-               lastRunServerUtc = "'%s'" % lastRunServer.strftime(self.TIME_FORMAT_HANA)
+               lastRunServerUtc = f"'{lastRunServer.strftime(self.TIME_FORMAT_HANA)}'"
             except:
-               logger.error("could not format lastRunServer=%s into HANA format" % str(lastRunServer))
+               logger.error(
+                   f"could not format lastRunServer={str(lastRunServer)} into HANA format"
+               )
                return None
-            logger.info("time series query for check %s_%s has been run at %s, filter out only new records since then" % \
-               (self.prefix, self.name, lastRunServerUtc))
-         logger.debug("lastRunServerUtc = %s" % lastRunServerUtc)
+            logger.info(
+                f"time series query for check {self.prefix}_{self.name} has been run at {lastRunServerUtc}, filter out only new records since then"
+            )
+         else:
+            logger.info("time series query for check %s_%s has never been run, applying initalTimespanSecs=%d" % \
+                  (self.prefix, self.name, self.initialTimespanSecs))
+            lastRunServerUtc = "ADD_SECONDS(NOW(), i.VALUE*(-1) - %d)" % self.initialTimespanSecs
+         logger.debug(f"lastRunServerUtc = {lastRunServerUtc}")
          sql = sql.replace("{lastRunServerUtc}", lastRunServerUtc, 1)
-         logger.debug("sql=%s" % sql)
-         # sys.exit()
+         logger.debug(f"sql={sql}")
+            # sys.exit()
       return sql
 
    def run(self, hana):
@@ -182,12 +184,10 @@ class SapHanaCheck(SapmonCheck):
       Run this SAP HANA-specific check
       """
       logger.info("running HANA SQL query")
-      sql = self.prepareSql()
-      if sql:
+      if sql := self.prepareSql():
          self.colIndex, self.lastResult = hana.runQuery(sql)
          self.updateState(hana)
-      resultJson = self.convertResultIntoJson()
-      return resultJson
+      return self.convertResultIntoJson()
 
    def calculateResultHash(self):
       """
@@ -200,9 +200,9 @@ class SapHanaCheck(SapmonCheck):
       else:
          try:
             resultHash = hashlib.md5(str(self.lastResult).encode("utf-8")).hexdigest()
-            logger.debug("resultHash=%s" % resultHash)
+            logger.debug(f"resultHash={resultHash}")
          except Exception as e:
-            logger.error("could not calculate result hash (%s)" % e)
+            logger.error(f"could not calculate result hash ({e})")
       return resultHash
 
    def convertResultIntoJson(self):
@@ -213,24 +213,24 @@ class SapHanaCheck(SapmonCheck):
       logData  = []
       jsonData = "{}"
       for r in self.lastResult:
-         logItem = {}
-         for c in self.colIndex.keys():
-            if c != self.colTimeGenerated and (c.startswith("_") or c == "DUMMY"): # remove internal fields
-               continue
-            logItem[c] = r[self.colIndex[c]]
+         logItem = {
+             c: r[self.colIndex[c]]
+             for c in self.colIndex.keys() if c == self.colTimeGenerated
+             or not c.startswith("_") and c != "DUMMY"
+         }
          logData.append(logItem)
       try:
          resultJson = json.dumps(logData, sort_keys=True, indent=4, cls=_JsonEncoder)
-         logger.debug("resultJson=%s" % str(resultJson))
+         logger.debug(f"resultJson={resultJson}")
       except Exception as e:
-         logger.error("could not encode logItem=%s into JSON (%s)" % (logItem, e))
+         logger.error(f"could not encode logItem={logItem} into JSON ({e})")
       return resultJson
 
    def updateState(self, hana):
       """
       Update the internal state of this check (including last run times)
       """
-      logger.info("updating internal state of check %s_%s" % (self.prefix, self.name))
+      logger.info(f"updating internal state of check {self.prefix}_{self.name}")
       self.state["lastRunLocal"] = datetime.utcnow()
       if len(self.lastResult) == 0:
          logger.info("SQL result is empty")
@@ -298,7 +298,6 @@ class REST:
    Provide access to a REST endpoint
    """
    @staticmethod
-   # TODO(tniek) - improve error handling (include HTTP status together with response)
    def sendRequest(endpoint, method = requests.get, params = {}, headers = {}, timeout = 5, data = None, debug = False):
       if debug:
          http_client.HTTPConnection.debuglevel = 1
@@ -325,7 +324,7 @@ class REST:
             print(response.content) # poor man's logging
             response.raise_for_status()
       except Exception as e:
-         logger.error("could not send HTTP request (%s)" % e)
+         logger.error(f"could not send HTTP request ({e})")
          return None
 
 ###############################################################################
@@ -343,26 +342,28 @@ class AzureInstanceMetadataService:
       params.update(AzureInstanceMetadataService.params)
       headers.update(AzureInstanceMetadataService.headers)
       return REST.sendRequest(
-         "%s/%s" % (AzureInstanceMetadataService.uri, endpoint),
-         params  = params,
-         headers = headers,
-         )
+          f"{AzureInstanceMetadataService.uri}/{endpoint}",
+          params=params,
+          headers=headers,
+      )
 
    @staticmethod
    def getComputeInstance(operation):
       """
       Get the compute instance for the current VM via IMS
       """
-      logger.info("getting compute instance")      
+      logger.info("getting compute instance")
       computeInstance = None
       try:
          computeInstance = AzureInstanceMetadataService._sendRequest(
-            "instance",
-            headers = {"User-Agent": "SAP Monitor/%s (%s)" % (PAYLOAD_VERSION, operation)}
-            )["compute"]
-         logger.debug("computeInstance=%s" % computeInstance)
+             "instance",
+             headers={
+                 "User-Agent": f"SAP Monitor/{PAYLOAD_VERSION} ({operation})"
+             },
+         )["compute"]
+         logger.debug(f"computeInstance={computeInstance}")
       except Exception as e:
-         logging.error("could not obtain instance metadata (%s)" % e)
+         logging.error(f"could not obtain instance metadata ({e})")
       return computeInstance
 
    @staticmethod
@@ -370,7 +371,9 @@ class AzureInstanceMetadataService:
       """
       Get an authentication token via IMDS
       """
-      logger.info("getting auth token for resource=%s%s" % (resource, ", msiClientId=%s" % msiClientId if msiClientId else ""))
+      logger.info(
+          f'getting auth token for resource={resource}{f", msiClientId={msiClientId}" if msiClientId else ""}'
+      )
       authToken = None
       try:
          authToken = AzureInstanceMetadataService._sendRequest(
@@ -378,7 +381,7 @@ class AzureInstanceMetadataService:
             params = {"resource": resource, "client_id": msiClientId}
             )["access_token"]
       except Exception as e:
-         logger.critical("could not get auth token (%s)" % e)
+         logger.critical(f"could not get auth token ({e})")
          sys.exit(ERROR_GETTING_AUTH_TOKEN)
       return authToken
 
@@ -391,14 +394,14 @@ class AzureKeyVault:
    params  = {"api-version": "7.0"}
 
    def __init__(self, kvName, msiClientId = None):
-      logger.info("initializing KeyVault %s" % kvName)
+      logger.info(f"initializing KeyVault {kvName}")
       self.kvName  = kvName
-      self.uri     = "https://%s.vault.azure.net" % kvName
+      self.uri = f"https://{kvName}.vault.azure.net"
       self.token   = AzureInstanceMetadataService.getAuthToken("https://vault.azure.net", msiClientId)
       self.headers = {
-         "Authorization": "Bearer %s" % self.token,
-         "Content-Type":  "application/json"
-         }
+          "Authorization": f"Bearer {self.token}",
+          "Content-Type": "application/json",
+      }
 
    def _sendRequest(self, endpoint, method = requests.get, data = None):
       """
@@ -419,16 +422,16 @@ class AzureKeyVault:
       """
       Set a secret in the KeyVault
       """
-      logger.info("setting KeyVault secret for secretName=%s" % secretName)
+      logger.info(f"setting KeyVault secret for secretName={secretName}")
       success = False
       try:
          (success, response) = self._sendRequest(
-            "%s/secrets/%s" % (self.uri, secretName),
-            method = requests.put,
-            data   = json.dumps({"value": secretValue})
-            )
+             f"{self.uri}/secrets/{secretName}",
+             method=requests.put,
+             data=json.dumps({"value": secretValue}),
+         )
       except Exception as e:
-         logger.critical("could not set KeyVault secret (%s)" % e)
+         logger.critical(f"could not set KeyVault secret ({e})")
          sys.exit(ERROR_SETTING_KEYVAULT_SECRET)
       return success
 
@@ -436,12 +439,12 @@ class AzureKeyVault:
       """
       Get the current version of a specific secret in the KeyVault
       """
-      logger.info("getting KeyVault secret for secretId=%s" % secretId)
+      logger.info(f"getting KeyVault secret for secretId={secretId}")
       secret = None
       try:
          (success, secret) = self._sendRequest(secretId)
       except Exception as e:
-         logger.error("could not get KeyVault secret for secretId=%s (%s)" % (secretId, e))
+         logger.error(f"could not get KeyVault secret for secretId={secretId} ({e})")
       return secret
 
    def getCurrentSecrets(self):
@@ -451,28 +454,28 @@ class AzureKeyVault:
       logger.info("getting current KeyVault secrets")
       secrets = {}
       try:
-         (success, kvSecrets) = self._sendRequest("%s/secrets" % self.uri)
-         logger.debug("kvSecrets=%s" % kvSecrets)
+         (success, kvSecrets) = self._sendRequest(f"{self.uri}/secrets")
+         logger.debug(f"kvSecrets={kvSecrets}")
          for k in kvSecrets:
             id = k["id"].split("/")[-1]
             secrets[id] = self.getSecret(k["id"])
       except Exception as e:
-         logger.error("could not get current KeyVault secrets (%s)" % e)
+         logger.error(f"could not get current KeyVault secrets ({e})")
       return secrets
 
    def exists(self):
       """
       Check if a KeyVault with a specified name exists
       """
-      logger.info("checking if KeyVault %s exists" % self.kvName)
+      logger.info(f"checking if KeyVault {self.kvName} exists")
       try:
-         (success, response) = self._sendRequest("%s/secrets" % self.uri)
+         (success, response) = self._sendRequest(f"{self.uri}/secrets")
       except Exception as e:
-         logger.error("could not determine is KeyVault %s exists (%s)" % (kvName, e))
+         logger.error(f"could not determine is KeyVault {kvName} exists ({e})")
       if success:
-         logger.info("KeyVault %s exists" % self.kvName)
+         logger.info(f"KeyVault {self.kvName} exists")
       else:
-         logger.info("KeyVault %s does not exist" % self.kvName)
+         logger.info(f"KeyVault {self.kvName} does not exist")
       return success
 
 ###############################################################################
@@ -485,7 +488,7 @@ class AzureLogAnalytics:
       logger.info("initializing Log Analytics instance")
       self.workspaceId = workspaceId
       self.sharedKey   = sharedKey
-      self.uri         = "https://%s.ods.opinsights.azure.com/api/logs?api-version=2016-04-01" % workspaceId
+      self.uri = f"https://{workspaceId}.ods.opinsights.azure.com/api/logs?api-version=2016-04-01"
       return
 
    def ingest(self, logType, jsonData, colTimeGenerated):
@@ -506,7 +509,7 @@ x-ms-date:%s
             digestmod=hashlib.sha256).digest()
          )
          stringHash = encodedHash.decode("utf-8")
-         return "SharedKey %s:%s" % (self.workspaceId, stringHash)
+         return f"SharedKey {self.workspaceId}:{stringHash}"
 
       logger.info("ingesting telemetry into Log Analytics")
       timestamp = datetime.utcnow().strftime(TIME_FORMAT_LOG_ANALYTICS)
@@ -517,7 +520,7 @@ x-ms-date:%s
          "x-ms-date":     timestamp,
          "time-generated-field": colTimeGenerated,
       }
-      logger.debug("data=%s" % jsonData)
+      logger.debug(f"data={jsonData}")
       response = None
       try:
          response = REST.sendRequest(
@@ -527,7 +530,7 @@ x-ms-date:%s
             data    = jsonData,
             )
       except Exception as e:
-         logger.error("could not ingest telemetry into Log Analytics (%s)" % e)
+         logger.error(f"could not ingest telemetry into Log Analytics ({e})")
       return response
 
 ###############################################################################
@@ -572,9 +575,9 @@ class _Context(object):
       logger.info("initializing context")
       self.vmInstance = AzureInstanceMetadataService.getComputeInstance(operation)
       self.vmTags = dict(map(lambda s : s.split(':'), self.vmInstance["tags"].split(";")))
-      logger.debug("vmTags=%s" % self.vmTags)
+      logger.debug(f"vmTags={self.vmTags}")
       self.sapmonId = self.vmTags["SapMonId"]
-      logger.debug("sapmonId=%s " % self.sapmonId)
+      logger.debug(f"sapmonId={self.sapmonId} ")
       self.azKv = AzureKeyVault(KEYVAULT_NAMING_CONVENTION % self.sapmonId, self.vmTags.get("SapMonMsiClientId", None))
       if not self.azKv.exists():
          sys.exit(ERROR_KEYVAULT_NOT_FOUND)
@@ -596,7 +599,9 @@ class _Context(object):
          formatter = logging.Formatter(LOG_CONFIG["formatters"]["detailed"]["format"])
          queueStorageLogHandler.setFormatter(formatter)
       except Exception:
-         logger.error("could not add handler for the storage queue logging: %s "%traceback.format_exc())
+         logger.error(
+             f"could not add handler for the storage queue logging: {traceback.format_exc()} "
+         )
          return
       logger.addHandler(queueStorageLogHandler)
       return
@@ -609,35 +614,41 @@ class _Context(object):
       for filename in os.listdir(PAYLOAD_DIRECTORY):
          if not filename.endswith(".json"):
             continue
-         contentFullPath = "%s/%s" % (PAYLOAD_DIRECTORY, filename)
-         logger.debug("contentFullPath=%s" % contentFullPath)
+         contentFullPath = f"{PAYLOAD_DIRECTORY}/{filename}"
+         logger.debug(f"contentFullPath={contentFullPath}")
          try:
             with open(contentFullPath, "r") as file:
                data = file.read()
             jsonData = json.loads(data)
          except Exception as e:
-            logger.error("could not load content file %s (%s)" % (contentFullPath, e))
+            logger.error(f"could not load content file {contentFullPath} ({e})")
          contentType = jsonData.get("contentType", None)
          if not contentType:
-            logging.error("content type not specified in content file %s, skipping" % contentFullPath)
+            logging.error(
+                f"content type not specified in content file {contentFullPath}, skipping"
+            )
             continue
          contentVersion = jsonData.get("contentVersion", None)
          if not contentVersion:
-            logging.error("content version not specified in content file %s, skipping" % contentFullPath)
+            logging.error(
+                f"content version not specified in content file {contentFullPath}, skipping"
+            )
             continue
          checks = jsonData.get("checks", [])
-         if not contentType in sapmonContentTypes:
-            logging.error("unknown content type %s, skipping content file %s" % (contentType, contentFullPath))
+         if contentType not in sapmonContentTypes:
+            logging.error(
+                f"unknown content type {contentType}, skipping content file {contentFullPath}"
+            )
             continue
          for checkOptions in checks:
             try:
-               logging.info("instantiate check of type %s" % contentType)
+               logging.info(f"instantiate check of type {contentType}")
                checkOptions["version"] = contentVersion
-               logging.debug("checkOptions=%s" % checkOptions)
+               logging.debug(f"checkOptions={checkOptions}")
                check = eval(sapmonContentTypes[contentType])(**checkOptions)
                self.availableChecks.append(check)
             except Exception as e:
-               logger.error("could not instantiate new check of type %s (%s)" % (contentType, e))
+               logger.error(f"could not instantiate new check of type {contentType} ({e})")
       logger.info("successfully loaded %d monitoring checks" % len(self.availableChecks))
       return
 
@@ -646,28 +657,27 @@ class _Context(object):
       Get most recent state from a local file
       """
       logger.info("reading state file")
-      success  = True
       jsonData = {}
       try:
-         logger.debug("STATE_FILE=%s" % STATE_FILE)
+         logger.debug(f"STATE_FILE={STATE_FILE}")
          with open(STATE_FILE, "r") as file:
             data = file.read()
          jsonData = json.loads(data, object_hook=_JsonDecoder.datetimeHook)
       except FileNotFoundError as e:
-         logger.warning("state file %s does not exist" % STATE_FILE)
+         logger.warning(f"state file {STATE_FILE} does not exist")
       except Exception as e:
-         logger.error("could not read state file %s (%s)" % (STATE_FILE, e))
+         logger.error(f"could not read state file {STATE_FILE} ({e})")
       for c in self.availableChecks:
-         sectionKey = "%s_%s" % (c.prefix, c.name)
+         sectionKey = f"{c.prefix}_{c.name}"
          if sectionKey in jsonData:
-            logger.debug("parsing section %s" % sectionKey)
+            logger.debug(f"parsing section {sectionKey}")
             section = jsonData.get(sectionKey, {})
             for k in section.keys():
                c.state[k] = section[k]
          else:
-            logger.warning("section %s not found in state file" % sectionKey)
+            logger.warning(f"section {sectionKey} not found in state file")
       logger.info("successfully parsed state file")
-      return success
+      return True
 
    def writeStateFile(self):
       """
@@ -677,15 +687,15 @@ class _Context(object):
       success  = False
       jsonData = {}
       try:
-         logger.debug("STATE_FILE=%s" % STATE_FILE)
+         logger.debug(f"STATE_FILE={STATE_FILE}")
          for c in self.availableChecks:
-            sectionKey = "%s_%s" % (c.prefix, c.name)
+            sectionKey = f"{c.prefix}_{c.name}"
             jsonData[sectionKey] = c.state
          with open(STATE_FILE, "w") as file:
             json.dump(jsonData, file, indent=3, cls=_JsonEncoder)
          success = True
       except Exception as e:
-         logger.error("could not write state file %s (%s)" % (STATE_FILE, e))
+         logger.error(f"could not write state file {STATE_FILE} ({e})")
       return success
 
    def fetchHanaPasswordFromKeyVault(self, passwordKeyVault, passwordKeyVaultMsiClientId):
@@ -693,9 +703,9 @@ class _Context(object):
       Fetch HANA password from a separate KeyVault.
       """
       vaultNameSearch = re.search("https://(.*).vault.azure.net", passwordKeyVault)
-      logger.debug("vaultNameSearch=%s" % vaultNameSearch)
-      kv = AzureKeyVault(vaultNameSearch.group(1), passwordKeyVaultMsiClientId)
-      logger.debug("kv=%s" % kv)
+      logger.debug(f"vaultNameSearch={vaultNameSearch}")
+      kv = AzureKeyVault(vaultNameSearch[1], passwordKeyVaultMsiClientId)
+      logger.debug(f"kv={kv}")
       return kv.getSecret(passwordKeyVault)
 
    def parseSecrets(self):
@@ -707,9 +717,9 @@ class _Context(object):
 
       def fetchHanaPasswordFromKeyVault(self, passwordKeyVault, passwordKeyVaultMsiClientId):
          vaultNameSearch = re.search('https://(.*).vault.azure.net', passwordKeyVault)
-         logger.debug("vaultNameSearch=%s" % vaultNameSearch)
-         kv = AzureKeyVault(vaultNameSearch.group(1), passwordKeyVaultMsiClientId)
-         logger.debug("kv=%s" % kv)
+         logger.debug(f"vaultNameSearch={vaultNameSearch}")
+         kv = AzureKeyVault(vaultNameSearch[1], passwordKeyVaultMsiClientId)
+         logger.debug(f"kv={kv}")
          return kv.getSecret(passwordKeyVault)
 
       logger.info("parsing secrets")
@@ -728,12 +738,14 @@ class _Context(object):
                hanaDetails["HanaDbPassword"] = password
                logger.debug("retrieved HANA password successfully from KeyVault")
             except Exception as e:
-               logger.critical("could not fetch HANA password (instance=%s) from KeyVault (%s)" % (h, e))
+               logger.critical(
+                   f"could not fetch HANA password (instance={h}) from KeyVault ({e})"
+               )
                sys.exit(ERROR_GETTING_HANA_CREDENTIALS)
          try:
             hanaInstance = SapHana(hanaDetails = hanaDetails)
          except Exception as e:
-            logger.error("could not create HANA instance %s) (%s)" % (h, e))
+            logger.error(f"could not create HANA instance {h}) ({e})")
             continue
          self.hanaInstances.append(hanaInstance)
 
@@ -741,7 +753,7 @@ class _Context(object):
       try:
          laSecret = json.loads(secrets["AzureLogAnalytics"])
       except Exception as e:
-         logger.critical("could not fetch Log Analytics credentials (%s)" % e)
+         logger.critical(f"could not fetch Log Analytics credentials ({e})")
          sys.exit(ERROR_GETTING_LOG_CREDENTIALS)
       self.azLa = AzureLogAnalytics(
          laSecret["LogAnalyticsWorkspaceId"],
@@ -766,13 +778,13 @@ class _JsonDecoder(json.JSONDecoder):
    """
    Helper class to de-serialize JSON into datetime and Decimal objects
    """
-   def datetimeHook(jsonData):
-      for (k, v) in jsonData.items():
+   def datetimeHook(self):
+      for (k, v) in self.items():
          try:
-            jsonData[k] = datetime.strptime(v, TIME_FORMAT_JSON)
+            self[k] = datetime.strptime(v, TIME_FORMAT_JSON)
          except Exception as e:
             pass
-      return jsonData
+      return self
 
 ###############################################################################
 
@@ -787,8 +799,8 @@ def onboard(args):
    logger.info("starting onboarding payload")
 
    # Credentials (provided by user) to the existing HANA instance
-   hanaSecretName = "SapHana-%s" % args.HanaDbName
-   logger.debug("hanaSecretName=%s" % hanaSecretName)
+   hanaSecretName = f"SapHana-{args.HanaDbName}"
+   logger.debug(f"hanaSecretName={hanaSecretName}")
    hanaSecretValue = json.dumps({
       "HanaHostname":                args.HanaHostname,
       "HanaDbName":                  args.HanaDbName,
@@ -802,12 +814,12 @@ def onboard(args):
    try:
       ctx.azKv.setSecret(hanaSecretName, hanaSecretValue)
    except Exception as e:
-      logger.critical("could not store HANA credentials in KeyVault secret (%s)" % e)
+      logger.critical(f"could not store HANA credentials in KeyVault secret ({e})")
       sys.exit(ERROR_SETTING_KEYVAULT_SECRET)
 
    # Credentials (created by HanaRP) to the newly created Log Analytics Workspace
    laSecretName = "AzureLogAnalytics"
-   logger.debug("laSecretName=%s" % laSecretName)
+   logger.debug(f"laSecretName={laSecretName}")
    laSecretValue = json.dumps({
       "LogAnalyticsWorkspaceId": args.LogAnalyticsWorkspaceId,
       "LogAnalyticsSharedKey":   args.LogAnalyticsSharedKey,
@@ -816,7 +828,9 @@ def onboard(args):
    try:
       ctx.azKv.setSecret(laSecretName, laSecretValue)
    except Exception as e:
-      logger.critical("could not store Log Analytics credentials in KeyVault secret (%s)" % e)
+      logger.critical(
+          f"could not store Log Analytics credentials in KeyVault secret ({e})"
+      )
       sys.exit(ERROR_SETTING_KEYVAULT_SECRET)
 
    hanaDetails = json.loads(hanaSecretValue)
@@ -834,7 +848,7 @@ def onboard(args):
       hana.runQuery("SELECT 0 FROM DUMMY")
       hana.disconnect()
    except Exception as e:
-      logger.critical("could not connect to HANA instance and run test query (%s)" % e)
+      logger.critical(f"could not connect to HANA instance and run test query ({e})")
       sys.exit(ERROR_HANA_CONNECTION)
 
    logger.info("onboarding payload successfully completed")
@@ -857,21 +871,21 @@ def monitor(args):
       try:
          h.connect()
       except Exception as e:
-         logger.critical("could not connect to HANA instance (%s)" % e)
+         logger.critical(f"could not connect to HANA instance ({e})")
          sys.exit(ERROR_HANA_CONNECTION)
 
       for c in ctx.availableChecks:
          if not c.state["isEnabled"]:
-            logger.info("check %s_%s has been disabled, skipping" % (c.prefix, c.name))
+            logger.info(f"check {c.prefix}_{c.name} has been disabled, skipping")
             continue
          lastRunLocal = c.state["lastRunLocal"]
          logger.debug("lastRunLocal=%s; frequencySecs=%d; currentLocal=%s" % \
             (lastRunLocal, c.frequencySecs, datetime.utcnow()))
          if lastRunLocal and \
             lastRunLocal + timedelta(seconds=c.frequencySecs) > datetime.utcnow():
-            logger.info("check %s_%s is not due yet, skipping" % (c.prefix, c.name))
+            logger.info(f"check {c.prefix}_{c.name} is not due yet, skipping")
             continue
-         logger.info("running check %s_%s" % (c.prefix, c.name))
+         logger.info(f"running check {c.prefix}_{c.name}")
          resultJson = c.run(h)
          ctx.azLa.ingest(c.customLog, resultJson, c.colTimeGenerated)
       ctx.writeStateFile()
@@ -879,7 +893,7 @@ def monitor(args):
       try:
          h.disconnect()
       except Exception as e:
-         logger.error("could not disconnect from HANA instance (%s)" % e)
+         logger.error(f"could not disconnect from HANA instance ({e})")
 
    logger.info("monitor payload successfully completed")
    return

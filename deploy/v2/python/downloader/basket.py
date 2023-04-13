@@ -48,18 +48,12 @@ if app:
 if db:
     packages += db.packages
 if rti:
-    packages += rti.packages  
+    packages += rti.packages
 for p in packages:
-    # Evaluate global condition to decide what software to download
-    skip = False
-    for c in p.condition:
-        if not eval(c):
-            skip = True
-            break
-
+    skip = any(not eval(c) for c in p.condition)
     if skip:
         continue
-    print("Retrieving package %s..." % p.name)
+    print(f"Retrieving package {p.name}...")
 
     # iterate through all OS available for package
     for o in p.os_avail:
@@ -73,11 +67,20 @@ for p in packages:
         cnt     = 0
         while cnt < len(results):
             r = results[cnt]
-            assert("Description" in r and "Infotype" in r and "Fastkey" in r and "Filesize" in r and "ReleaseDate" in r), \
-                "Result does not have all required keys (%s)" % (str(r))
+            assert (
+                "Description" in r
+                and "Infotype" in r
+                and "Fastkey" in r
+                and "Filesize" in r
+                and "ReleaseDate" in r
+            ), f"Result does not have all required keys ({str(r)})"
 
             r["Filesize"]   = int(r["Filesize"])
-            r["ReleaseDate"]  = int(re.search("(\d+)", r["ReleaseDate"]).group(1)) if re.search("(\d+)", r["ReleaseDate"]) else 0
+            r["ReleaseDate"] = (
+                int(re.search("(\d+)", r["ReleaseDate"])[1])
+                if re.search("(\d+)", r["ReleaseDate"])
+                else 0
+            )
 
             # Filter out packages that don't match  
             filtered_out = False

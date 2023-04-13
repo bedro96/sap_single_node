@@ -22,8 +22,8 @@ class DLM:
 
     @staticmethod
     def init(base_dir, dryrun):
-        DLM.skip_download = dryrun if dryrun else False
-        DLM.base_dir      = base_dir if base_dir else ""
+        DLM.skip_download = dryrun or False
+        DLM.base_dir = base_dir or ""
 
         DLM.sess = HTTPSession(
         auth     = HTTPBasicAuth(
@@ -91,15 +91,15 @@ class DownloadItem:
     skip_download = False
 
     def __init__(self, id=None, desc=None, size=None, time=None, filename=None, base_dir=None, target_dir=None, last_pos=None, skip_download=None):
-        self.id            = id if id else ""
-        self.desc          = desc if desc else ""
-        self.size          = size if size else 0
-        self.time          = time if time else 0
-        self.filename      = filename if filename else ""
-        self.base_dir      = base_dir if base_dir else ""
-        self.target_dir    = target_dir if target_dir else ""
-        self.last_pos      = last_pos if last_pos else 0
-        self.skip_download = skip_download if skip_download else False
+        self.id = id or ""
+        self.desc = desc or ""
+        self.size = size or 0
+        self.time = time or 0
+        self.filename = filename or ""
+        self.base_dir = base_dir or ""
+        self.target_dir = target_dir or ""
+        self.last_pos = last_pos or 0
+        self.skip_download = skip_download or False
 
     def download(self):
         payload = {
@@ -115,16 +115,16 @@ class DownloadItem:
                 break
             print("Received status code %d -> retrying..." % resp.status_code)
         assert(resp.status_code == 200), \
-            "Unexpected response from DLM; status = %d" % (resp.status_code)
+                "Unexpected response from DLM; status = %d" % (resp.status_code)
 
-        if not "content-disposition" in resp.headers:
+        if "content-disposition" not in resp.headers:
             return
         disposition = resp.headers["content-disposition"]
 
         # Find filename
         if disposition.find('filename="') < 0:
             return
-        filename    = re.search("\"(.*?)\"",disposition).group(1)
+        filename = re.search("\"(.*?)\"",disposition)[1]
 
         # If no path provided from input, create directory for files: either the latest timestamp from Download Basket or "bits"
         if self.base_dir:
@@ -142,11 +142,10 @@ class DownloadItem:
             if os.path.isfile(target):
                 if os.path.getsize(target) == expected_length:
                     print("file exists already")
-                    success = True
-                    return success
+                    return True
                 else:
                     self.last_pos = os.path.getsize(target)
-                    print("current file size is %s ..." % self.last_pos)
+                    print(f"current file size is {self.last_pos} ...")
         if self.skip_download:
             return True
 
@@ -155,12 +154,12 @@ class DownloadItem:
             resume_header = ({'Range': 'bytes={self.last_pos}-'})
             resp  = DLM.sess.get(DLM.url_token, params=payload, timeout=resp_timeout_sec, stream=True, headers=resume_header)
             if self.last_pos > 0:
-                print("Resume at last_pos %s" % self.last_pos)
+                print(f"Resume at last_pos {self.last_pos}")
             if resp.status_code == 200:
                 break
             print("Received status code %d -> retrying..." % resp.status_code)
         assert(resp.status_code == 200), \
-            "Unexpected response from DLM; status = %d" % (resp.status_code)
+                "Unexpected response from DLM; status = %d" % (resp.status_code)
 
         with open(target, "wb") as f:
             try:
@@ -170,7 +169,7 @@ class DownloadItem:
                         f.flush()
                 success = True
             except Exception as e:
-                print("Exception %s happens, retry..." % e)
+                print(f"Exception {e} happens, retry...")
         return success
 
 class DownloadBasket:
@@ -209,16 +208,28 @@ class DownloadBasket:
         total_complete_size = 0
         for cnt in range(len(self.items)):
             i = self.items[cnt]
-            print("%-9s %-42s %12s - %10s" % (
-                "(%d/%d)" % (cnt+1, len(self.items)),
-                "%s" % ((i.desc[:40] + '..') if len(i.desc) > 40 else i.desc),
-                "(%d KB)" % (i.size),
-                "Done: %3d%%" % (int(float(total_complete_size) / float(self.total_size)*100)),
-            ))
-                        
+            print(
+                (
+                    "%-9s %-42s %12s - %10s"
+                    % (
+                        "(%d/%d)" % (cnt + 1, len(self.items)),
+                        f"{f'{i.desc[:40]}..' if len(i.desc) > 40 else i.desc}",
+                        "(%d KB)" % (i.size),
+                        "Done: %3d%%"
+                        % (
+                            int(
+                                float(total_complete_size)
+                                / float(self.total_size)
+                                * 100
+                            )
+                        ),
+                    )
+                )
+            )
+
             success = False
             while not success:
                 success = i.download()
-                        
+
             total_complete_size += i.size
         print("%65s - Done: 100%%" % ("(%d KB)" % self.total_size))

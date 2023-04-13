@@ -63,13 +63,13 @@ Latency Test:
 
 
 '''
+
 import argparse
 import json
 
 global test_count
 test_count = 0
-hwcct_test = {}
-hwcct_test["test"]={}
+hwcct_test = {"test": {}}
 #hwcct_test["write"]=[]
 #hwcct_test["read"]=[]
 def test_blockParser(testName,line,f,testCase):
@@ -105,10 +105,9 @@ def parseDISKTest(logfile, outputfile):
             if line.startswith("***"):
                 #skip one line and then capture the test name
                 line = skip_until(line,"* Output",f)
-                test_case = {}
                 blocksize = line.split("for")[1]
                 blocksize = 'B'+blocksize.split(" ")[1]
-                test_case[blocksize] = {}
+                test_case = {blocksize: {}}
                 #skip until line starts with Results
                 line = skip_until(line,"Results",f)
                 #Initial write test

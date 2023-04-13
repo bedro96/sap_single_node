@@ -40,36 +40,38 @@ class SMP:
         if post_data:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-        if not post_data:
-            resp = SMP.sess.get(
+        resp = (
+            SMP.sess.post(
                 url,
-                headers = headers,
-                allow_redirects = allow_redirects,
+                headers=headers,
+                data=post_data,
+                allow_redirects=allow_redirects,
             )
-        else:
-            resp = SMP.sess.post(
+            if post_data
+            else SMP.sess.get(
                 url,
-                headers = headers,
-                data = post_data,
-                allow_redirects = allow_redirects,
+                headers=headers,
+                allow_redirects=allow_redirects,
             )
+        )
         assert(resp.status_code < 400), \
-            "Unable to %s (%s); status = %d" % (desc, url, resp.status_code)
+                "Unable to %s (%s); status = %d" % (desc, url, resp.status_code)
 
         soup = BeautifulSoup(resp.content, 'html.parser')
         inputs = {}
         for i in soup.find_all("input"):
             field, value = i.get("name"), i.get("value")
             inputs[field] = value
-        assert(all(i in inputs for i in required_inputs)), \
-            "%s inputs (%s) does not contain required fields (%s)" % (desc, inputs, required_inputs)
-        
-        next_body = body_prefix + "&" if body_prefix else ""
+        assert all(
+            i in inputs for i in required_inputs
+        ), f"{desc} inputs ({inputs}) does not contain required fields ({required_inputs})"
+
+        next_body = f"{body_prefix}&" if body_prefix else ""
         for cnt in range(len(required_inputs)):
             if cnt > 0:
                 next_body += "&"
             i = required_inputs[cnt]
-            next_body += "%s=%s" % (i, urllib.parse.quote(inputs[i]))
+            next_body += f"{i}={urllib.parse.quote(inputs[i])}"
 
         return(resp.cookies, inputs, next_body)
 
@@ -183,18 +185,17 @@ class SMP:
         )
 
         assert(resp.status_code == 200), \
-            "Unable to retrieve search results; status = %d" % (resp.status_code)
+                "Unable to retrieve search results; status = %d" % (resp.status_code)
 
         j = json.loads(resp.content.decode("utf-8"))
         assert("d" in j and "results" in j["d"]), \
-            "Invalid search result format"
-        results = j["d"]["results"]
-        return results
+                "Invalid search result format"
+        return j["d"]["results"]
 
     @staticmethod
     def retrieve(params, os_filter):
         SMP.sess.headers["Accept"] = "application/json"
-        print("retrieving %s for %s..." % (params, os_filter))
+        print(f"retrieving {params} for {os_filter}...")
         payload = {
             "_EVENT"        : "LIST",
             "EVENT"         : "LIST",
@@ -204,17 +205,16 @@ class SMP:
         }
         # Setting this to SUPPORT PACKAGES & PATCHES for now;
         # may need to update logic for future scenarios
-        payload.update(SMP.params_maint)
+        payload |= SMP.params_maint
         payload.update(params)
         resp  = SMP.sess.get(
             SMP.url_retrieve,
             params=payload,
         )
         assert(resp.status_code == 200), \
-            "Unable to retrieve search results; status = %d" % (resp.status_code)
+                "Unable to retrieve search results; status = %d" % (resp.status_code)
         j = json.loads(resp.content.decode("utf-8"))
         assert("d" in j and "results" in j["d"]), \
-            "Invalid search result format"
-        results = j["d"]["results"]
-        return results
+                "Invalid search result format"
+        return j["d"]["results"]
     

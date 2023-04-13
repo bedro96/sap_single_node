@@ -8,10 +8,8 @@ def mergeJSON(a, b, path=None):
         if key in a:
             if isinstance(a[key], dict) and isinstance(b[key], dict):
                 mergeJSON(a[key], b[key], path + [str(key)])
-            elif a[key] == b[key]:
-                pass
-            else:
-            	a[key] = b[key]
+            elif a[key] != b[key]:
+                a[key] = b[key]
         else:
             a[key] = b[key]
     return a

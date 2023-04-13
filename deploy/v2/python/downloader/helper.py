@@ -47,13 +47,12 @@ class ConfigSection(object):
         return self
 
     def __next__(self):
-        if self.iterpos < len(list(self.param.keys())):
-            k = list(self.param.keys())[self.iterpos]
-            v = self.param[k]
-            self.iterpos += 1
-            return {k: v}
-        else:
+        if self.iterpos >= len(list(self.param.keys())):
             raise StopIteration
+        k = list(self.param.keys())[self.iterpos]
+        v = self.param[k]
+        self.iterpos += 1
+        return {k: v}
 
 
 class Config(object):
@@ -73,30 +72,32 @@ class Config(object):
 
     @staticmethod
     def load(filename):
-        assert(os.path.isfile(filename)), \
-            "Config file %s does not exist" % filename
+        assert (os.path.isfile(filename)), f"Config file {filename} does not exist"
 
         with open(filename) as f:
             input_json = json.load(f)
 
         assert(("software" in input_json and "downloader" in input_json["software"])), \
-            "Software and downloader fields are required in input.json"
+                "Software and downloader fields are required in input.json"
 
         data = input_json["software"]["downloader"]
 
         # Debug section
-        if "debug" in data:
-            if "enabled" in data["debug"] and data["debug"]["enabled"]:
-                Config.debug = ConfigSection(
-                    proxies = data["debug"]["proxies"] if "proxies" in data["debug"] else None,
-                    cert  = data["debug"]["cert"] if "cert" in data["debug"] else None
-                )
+        if (
+            "debug" in data
+            and "enabled" in data["debug"]
+            and data["debug"]["enabled"]
+        ):
+            Config.debug = ConfigSection(
+                proxies = data["debug"]["proxies"] if "proxies" in data["debug"] else None,
+                cert  = data["debug"]["cert"] if "cert" in data["debug"] else None
+            )
 
         # Credentials section
         assert("credentials" in data and \
-            "sap_user" in data["credentials"] and \
-            "sap_password" in data["credentials"]), \
-            "SAP credentials need to be specified"
+                "sap_user" in data["credentials"] and \
+                "sap_password" in data["credentials"]), \
+                "SAP credentials need to be specified"
         Config.credentials = ConfigSection(
             sap_user    = data["credentials"]["sap_user"],
             sap_password  = data["credentials"]["sap_password"]
@@ -104,33 +105,32 @@ class Config(object):
 
         # Scenarios section
         assert("scenarios" in data), \
-            "At least one scenario needs to be specified"
+                "At least one scenario needs to be specified"
         Config.scenarios  = data["scenarios"]
         for scenario_type in ("app", "db", "rti"):
             relev_avail_scenarios = [s for s in Config.scenarios if s["scenario_type"].upper() == scenario_type.upper()]
-            if len(relev_avail_scenarios) == 0:
+            if not relev_avail_scenarios:
                 continue
-            assert(len(relev_avail_scenarios) == 1), \
-                "Cannot have more than one %s scenario" % scenario_type
+            assert (
+                len(relev_avail_scenarios) == 1
+            ), f"Cannot have more than one {scenario_type} scenario"
             s = ConfigSection(relev_avail_scenarios[0])
-            avail_scenarios = globals()["avail_%ss" % scenario_type]
-            assert(s.product_name in avail_scenarios), \
-                "Unknown %s scenario: %s" % (scenario_type, s.product_name)
+            avail_scenarios = globals()[f"avail_{scenario_type}s"]
+            assert (
+                s.product_name in avail_scenarios
+            ), f"Unknown {scenario_type} scenario: {s.product_name}"
             matched_scenario = avail_scenarios[s.product_name]
-            assert(all(p in list(s.__dict__.keys()) for p in matched_scenario.required_params)), \
-                "Not all required parameters provided for %s scenario %s: %s" % \
-                (scenario_type, s.product_name, matched_scenario.required_params)
+            assert all(
+                p in list(s.__dict__.keys())
+                for p in matched_scenario.required_params
+            ), f"Not all required parameters provided for {scenario_type} scenario {s.product_name}: {matched_scenario.required_params}"
             # copy required packages into instance variable
             s.packages = matched_scenario.packages
-            setattr(
-                Config,
-                "%s_scenario" % scenario_type,
-                s,
-            )
+            setattr(Config, f"{scenario_type}_scenario", s)
         bastions = [bastion for bastion in Config.scenarios if bastion["scenario_type"].upper() == "BASTION"]
         for b in bastions:
-            assert("os_type" in b), \
-                "Need to specify OS for bastion host: %s" % b
-            assert(b["os_type"] not in Config.bastion_os), \
-                "Can only have one bastion host with OS %s" % b["os_type"]
+            assert ("os_type" in b), f"Need to specify OS for bastion host: {b}"
+            assert (
+                b["os_type"] not in Config.bastion_os
+            ), f'Can only have one bastion host with OS {b["os_type"]}'
             Config.bastion_os.append(str(b["os_type"]))
